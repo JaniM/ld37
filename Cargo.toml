@@ -1,0 +1,12 @@
+[package]
+name = "ld37"
+version = "0.1.0"
+authors = ["JaniM <janijohannes@kapsi.fi>"]
+
+[dependencies]
+rand = "*"
+sdl2 = "0.24.0"
+sdl2_image = "0.24.0"
+sdl2_ttf = "0.24.0"
+clock_ticks = "0.1.0"
+itertools = "*"
