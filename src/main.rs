@@ -18,6 +18,7 @@ use sdl2::rect::{Point, Rect};
 use sdl2_ttf::{Font};
 
 use rand::distributions::{IndependentSample};
+use rand::{Rng};
 
 const STOP_LIMIT: f64 = 10.0;
 
@@ -188,6 +189,72 @@ trait Collide<Other> {
     fn reflect(&self, circle: &Other, delta: f64) -> (Pointf64, Pointf64);
 }
 
+trait Effect {
+    fn update(&mut self, delta: f64) -> EffectChange;
+    fn render(&self, renderer: &mut Renderer, delta: f64);
+}
+
+#[derive(Debug, Copy, Clone)]
+enum EffectChange {
+    None,
+    Ended
+}
+
+#[derive(Debug, Copy, Clone)]
+struct BackgroundEffect {
+    start: (u8, u8, u8),
+    end: (u8, u8, u8),
+    width: i32,
+    direction: bool,
+    duration: f64,
+    time: f64,
+    alpha: u8
+}
+
+impl BackgroundEffect {
+    fn new(start: (u8, u8, u8), end: (u8, u8, u8), width: i32, direction: bool, duration: f64, alpha: u8) -> Self {
+        BackgroundEffect {
+            start: start,
+            end: end,
+            width: width,
+            direction: direction,
+            duration: duration,
+            time: 0.0,
+            alpha: alpha
+        }
+    }
+}
+
+impl Effect for BackgroundEffect {
+    fn update(&mut self, delta: f64) -> EffectChange {
+        self.time += delta;
+        return if self.time >= self.duration {
+            EffectChange::Ended
+        } else {
+            EffectChange::None
+        }
+    }
+    fn render(&self, renderer: &mut Renderer, delta: f64) {
+        let pos = if self.direction {
+            ((800.0 + self.width as f64) * (self.time / self.duration)) as i32
+        } else {
+            800 - ((800.0 + self.width as f64) * (self.time / self.duration)) as i32
+        };
+        for i in 0..self.width {
+            let shade = 1.0 - i as f64 / self.width as f64;
+            let r = self.start.0 + ((self.end.0 - self.start.0) as f64 * shade) as u8;
+            let g = self.start.1 + ((self.end.1 - self.start.1) as f64 * shade) as u8;
+            let b = self.start.2 + ((self.end.2 - self.start.2) as f64 * shade) as u8;
+            renderer.set_draw_color(Color::RGBA(r, g, b, self.alpha));
+            if self.direction {
+                renderer.draw_line(Point::new(pos - i, 0), Point::new(pos - i, 600)).unwrap();
+            } else {
+                renderer.draw_line(Point::new(pos + i, 0), Point::new(pos + i, 600)).unwrap();
+            }
+        }
+    }
+}
+
 enum GameStateChange {
     SwitchScene(Box<SceneObject>)
 }
@@ -225,7 +292,6 @@ impl GameState {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, PartialOrd)]
 struct PlayState {
     player: Player,
     aim: Targeting,
@@ -234,7 +300,10 @@ struct PlayState {
     hits: i32,
     spawn_timer: f64,
     spawn_time_limit: f64,
-    time: f64
+    trail_time: f64,
+    time: f64,
+    effects: Vec<Box<Effect>>,
+    bgtimer: f64
 }
 
 #[derive(Debug, Copy, Clone, PartialEq, PartialOrd)]
@@ -252,7 +321,7 @@ struct Player {
 
 #[derive(Debug, Clone, PartialEq, PartialOrd)]
 struct Trail {
-    circles: Vec<Circle>
+    circles: Vec<(f64, Circle)>
 }
 
 #[derive(Debug, Copy, Clone, PartialEq, PartialOrd)]
@@ -428,7 +497,8 @@ impl Circle {
 }
 
 impl PlayState {
-    fn initial(target_count: i32, spawn_time_limit: f64) -> PlayState {
+    fn initial(target_count: i32, spawn_time_limit: f64, trail_time: f64) -> PlayState {
+        println!("Started game with {} targets, {} spawn time and {} trail", target_count, spawn_time_limit, trail_time);
         PlayState {
             player: Player {
                 circle: Circle::new(400.0, 300.0, 10.0, Pointf64::new(0.0, 0.0), 0.9),
@@ -442,7 +512,10 @@ impl PlayState {
             hits: 0,
             spawn_timer: 0.0,
             spawn_time_limit: spawn_time_limit,
-            time: 0.0
+            trail_time: trail_time,
+            time: 0.0,
+            effects: vec![],
+            bgtimer: 1.0
         }
     }
 
@@ -462,6 +535,7 @@ impl SceneObject for PlayState {
 
         self.time += delta;
         self.spawn_timer += delta;
+        self.bgtimer -= delta;
 
         // Align and limit targeting
         let diff = mouse_p - self.player.circle.point;
@@ -495,7 +569,7 @@ impl SceneObject for PlayState {
                 killed.push(i);
                 continue 'targetloop;
             }
-            for t in &self.player.trail.circles {
+            for &(_a, ref t) in &self.player.trail.circles {
                 if circle.is_colliding(t) {
                     killed.push(i);
                     continue 'targetloop;
@@ -506,12 +580,38 @@ impl SceneObject for PlayState {
             self.targets.remove(i);
         }
 
-        self.player.trail.circles.push(self.player.circle);
-        for i in 0..self.player.trail.circles.len()-1 {
-            self.player.trail.circles[i] = self.player.trail.circles[i+1];
-            self.player.trail.circles[i].radius = 10.0 / (11.0 - (i as f64 / 10.0));
+        self.player.trail.circles.push((self.trail_time, self.player.circle));
+        let mut i = 0;
+        while i < self.player.trail.circles.len() {
+            self.player.trail.circles[i].0 -= delta;
+            if self.player.trail.circles[i].0 <= 0.0 {
+                self.player.trail.circles.remove(i);
+            } else {
+                self.player.trail.circles[i].1.radius = self.player.trail.circles[i].0 * (self.player.circle.radius / self.trail_time);
+                i += 1;
+            }
         }
-        self.player.trail.circles.truncate(100);
+        //self.player.trail.circles.truncate(100);
+
+        if self.bgtimer <= 0.0 {
+            self.bgtimer += 3.0;
+            let mut rng = rand::thread_rng();
+            let colord = rand::distributions::Range::new(0u8, 30u8);
+            let direction = rng.gen::<f64>() > 0.4;
+            self.effects.push(Box::new(BackgroundEffect::new((0, 0, 0), (colord.ind_sample(&mut rng), colord.ind_sample(&mut rng), colord.ind_sample(&mut rng)), 200, direction, 10.0, 150)) as Box<Effect>);
+        }
+
+        let mut i = 0;
+        while i < self.effects.len() {
+            match self.effects[i].update(delta) {
+                EffectChange::Ended => {
+                    self.effects.remove(i);
+                }
+                EffectChange::None => {
+                    i += 1;
+                }
+            }
+        }
 
         if self.targets.len() == 0 {
             game.switch_scene(ResultState::initial(Some(self.time)));
@@ -542,6 +642,10 @@ impl SceneObject for PlayState {
         renderer.set_draw_color(Color::RGB(0, 0, 0));
         renderer.clear();
 
+        for effect in &self.effects {
+            effect.render(renderer, delta);
+        }
+
         let mouse_p = Pointf64::new(game.inputs.mouse_x as f64, game.inputs.mouse_y as f64);
         let player_p = self.player.circle.point;
         let player_ps = self.player.circle.point.as_sdl();
@@ -559,7 +663,7 @@ impl SceneObject for PlayState {
         draw_circle(renderer, player_ps, self.player.circle.radius as i32);
 
         renderer.set_draw_color(Color::RGB(50, 50, 255));
-        for circle in self.player.trail.circles.iter() {
+        for &(_age, circle) in self.player.trail.circles.iter() {
             draw_circle(renderer, circle.point.as_sdl(), circle.radius as i32);
         }
 
@@ -598,17 +702,20 @@ impl SceneObject for PlayState {
     }
 }
 
-#[derive(Debug, Copy, Clone)]
 struct ResultState {
     time: Option<f64>,
-    timehere: f64
+    timehere: f64,
+    effects: Vec<Box<Effect>>,
+    bgtimer: f64
 }
 
 impl ResultState {
     fn initial(time: Option<f64>) -> Self {
         ResultState {
             time: time,
-            timehere: 0.0
+            timehere: 0.0,
+            effects: vec![],
+            bgtimer: 0.0
         }
     }
 }
@@ -617,29 +724,62 @@ impl SceneObject for ResultState {
     fn update(&mut self, game: &mut GameState, delta: f64) {
         self.timehere += delta;
 
+        self.bgtimer -= delta;
+
         let clicked = !game.inputs.last_mouse.left() && game.inputs.mouse.left();
         let mx = game.inputs.mouse_x;
         let my = game.inputs.mouse_y;
 
         if clicked && self.timehere > 2.0 {
-            if mx > 150 && mx < 250 && my > 380 && my < 420 { 
-                game.switch_scene(PlayState::initial(10, 5.0));
+            if mx > 145 && mx < 255 && my > 380 && my < 420 { 
+                game.switch_scene(PlayState::initial(10, 5.0, 0.8)); // Easier
             } else if mx > 320 && mx < 480 && my > 380 && my < 420 { 
-                game.switch_scene(PlayState::initial(10, 3.5));
-            } else if mx > 550 && mx < 650 && my > 380 && my < 420 { 
-                game.switch_scene(PlayState::initial(10, 2.0));
+                game.switch_scene(PlayState::initial(15, 3.5, 0.8)); // Medium
+            } else if mx > 545 && mx < 655 && my > 380 && my < 420 { 
+                game.switch_scene(PlayState::initial(20, 2.0, 0.6)); // Hard
+            } else if mx > 145 && mx < 255 && my > 480 && my < 520 { 
+                game.switch_scene(PlayState::initial(10, 5.0, 0.6)); // Easy
+            } else if mx > 320 && mx < 480 && my > 480 && my < 520 { 
+                game.switch_scene(PlayState::initial(15, 3.0, 0.6)); // Mediumer
+            } else if mx > 545 && mx < 655 && my > 480 && my < 520 { 
+                game.switch_scene(PlayState::initial(20, 1.5, 0.4)); // Harder
             } 
         }
+
+        if self.bgtimer <= 0.0 {
+            self.bgtimer += 2.5;
+            let mut rng = rand::thread_rng();
+            let colord = rand::distributions::Range::new(10u8, 70u8);
+            let direction = rng.gen::<f64>() > 0.5;
+            self.effects.push(Box::new(BackgroundEffect::new((0, 0, 0), (colord.ind_sample(&mut rng), colord.ind_sample(&mut rng), colord.ind_sample(&mut rng)), 200, direction, 10.0, 150)) as Box<Effect>);
+        }
+
+        let mut i = 0;
+        while i < self.effects.len() {
+            match self.effects[i].update(delta) {
+                EffectChange::Ended => {
+                    self.effects.remove(i);
+                }
+                EffectChange::None => {
+                    i += 1;
+                }
+            }
+        }
     }
+
     fn handle_event(&mut self, _game: &mut GameState, event: Event) {
         match event {
             _ => {}
         }
     }
 
-    fn render(&self, game: &mut GameState, renderer: &mut Renderer, _delta: f64) {
+    fn render(&self, game: &mut GameState, renderer: &mut Renderer, delta: f64) {
         renderer.set_draw_color(Color::RGB(0, 0, 0));
         renderer.clear();
+
+        for effect in &self.effects {
+            effect.render(renderer, delta);
+        }
 
         if let Some(time) = self.time {
             draw_text_centered(renderer, &game.score_font, 400, 200, Color::RGB(255, 255, 255),
@@ -650,37 +790,84 @@ impl SceneObject for ResultState {
                            "Select a difficulty below or hit ESC to exit.");
         
         draw_text_centered(renderer, &game.text_font, 200, 400, Color::RGB(200, 200, 200),
+                           "Easier");
+        draw_text(renderer, &game.info_font, 145, 425, Color::RGB(200, 200, 200),
+                  "Spawn time: 5s");
+        draw_text(renderer, &game.info_font, 145, 445, Color::RGB(200, 200, 200),
+                  "Longer tail");
+        
+        // Easier
+        renderer.set_draw_color(Color::RGB(255, 255, 255));
+        renderer.draw_line(Point::new(145, 380), Point::new(255, 380)).unwrap();
+        renderer.draw_line(Point::new(145, 380), Point::new(145, 420)).unwrap();
+        renderer.draw_line(Point::new(255, 380), Point::new(255, 420)).unwrap();
+        renderer.draw_line(Point::new(145, 420), Point::new(255, 420)).unwrap();
+
+        draw_text_centered(renderer, &game.text_font, 200, 500, Color::RGB(200, 200, 200),
                            "Easy");
-        draw_text(renderer, &game.info_font, 150, 425, Color::RGB(200, 200, 200),
+        draw_text(renderer, &game.info_font, 145, 525, Color::RGB(200, 200, 200),
                   "Spawn time: 5s");
         
+        // Easy
+        renderer.set_draw_color(Color::RGB(255, 255, 255));
+        renderer.draw_line(Point::new(145, 480), Point::new(255, 480)).unwrap();
+        renderer.draw_line(Point::new(145, 480), Point::new(145, 520)).unwrap();
+        renderer.draw_line(Point::new(255, 480), Point::new(255, 520)).unwrap();
+        renderer.draw_line(Point::new(145, 520), Point::new(255, 520)).unwrap();
+
         draw_text_centered(renderer, &game.text_font, 400, 400, Color::RGB(200, 200, 200),
                            "Medium");
         draw_text(renderer, &game.info_font, 320, 425, Color::RGB(200, 200, 200),
                   "Spawn time: 3.5s");
-        
-        draw_text_centered(renderer, &game.text_font, 600, 400, Color::RGB(200, 200, 200),
-                           "Hard");
-        draw_text(renderer, &game.info_font, 550, 425, Color::RGB(200, 200, 200),
-                  "Spawn time: 2s");
-        
-        renderer.set_draw_color(Color::RGB(255, 255, 255));
-        renderer.draw_line(Point::new(150, 380), Point::new(250, 380)).unwrap();
-        renderer.draw_line(Point::new(150, 380), Point::new(150, 420)).unwrap();
-        renderer.draw_line(Point::new(250, 380), Point::new(250, 420)).unwrap();
-        renderer.draw_line(Point::new(150, 420), Point::new(250, 420)).unwrap();
+        draw_text(renderer, &game.info_font, 320, 445, Color::RGB(200, 200, 200),
+                  "Longer tail");
 
+        // Medium
         renderer.set_draw_color(Color::RGB(255, 255, 255));
         renderer.draw_line(Point::new(320, 380), Point::new(480, 380)).unwrap();
         renderer.draw_line(Point::new(320, 380), Point::new(320, 420)).unwrap();
         renderer.draw_line(Point::new(480, 380), Point::new(480, 420)).unwrap();
         renderer.draw_line(Point::new(320, 420), Point::new(480, 420)).unwrap();
 
+        draw_text_centered(renderer, &game.text_font, 400, 500, Color::RGB(200, 200, 200),
+                           "Mediumer");
+        draw_text(renderer, &game.info_font, 320, 525, Color::RGB(200, 200, 200),
+                  "Spawn time: 3s");
+
+        // Medium
         renderer.set_draw_color(Color::RGB(255, 255, 255));
-        renderer.draw_line(Point::new(550, 380), Point::new(650, 380)).unwrap();
-        renderer.draw_line(Point::new(550, 380), Point::new(550, 420)).unwrap();
-        renderer.draw_line(Point::new(650, 380), Point::new(650, 420)).unwrap();
-        renderer.draw_line(Point::new(550, 420), Point::new(650, 420)).unwrap();
+        renderer.draw_line(Point::new(320, 480), Point::new(480, 480)).unwrap();
+        renderer.draw_line(Point::new(320, 480), Point::new(320, 520)).unwrap();
+        renderer.draw_line(Point::new(480, 480), Point::new(480, 520)).unwrap();
+        renderer.draw_line(Point::new(320, 520), Point::new(480, 520)).unwrap();
+
+        draw_text_centered(renderer, &game.text_font, 600, 400, Color::RGB(200, 200, 200),
+                           "Hard");
+        draw_text(renderer, &game.info_font, 545, 425, Color::RGB(200, 200, 200),
+                  "Spawn time: 2s");
+
+        // Hard
+        renderer.set_draw_color(Color::RGB(255, 255, 255));
+        renderer.draw_line(Point::new(545, 380), Point::new(655, 380)).unwrap();
+        renderer.draw_line(Point::new(545, 380), Point::new(545, 420)).unwrap();
+        renderer.draw_line(Point::new(655, 380), Point::new(655, 420)).unwrap();
+        renderer.draw_line(Point::new(545, 420), Point::new(655, 420)).unwrap();
+
+        draw_text_centered(renderer, &game.text_font, 600, 500, Color::RGB(200, 200, 200),
+                           "Harder");
+        draw_text(renderer, &game.info_font, 545, 525, Color::RGB(200, 200, 200),
+                  "Spawn time: 1.5s");
+        draw_text(renderer, &game.info_font, 545, 545, Color::RGB(200, 200, 200),
+                  "Short tail");
+        draw_text(renderer, &game.info_font, 545, 565, Color::RGB(200, 200, 200),
+                  "The true test");
+        
+        // Harder
+        renderer.set_draw_color(Color::RGB(255, 255, 255));
+        renderer.draw_line(Point::new(545, 480), Point::new(655, 480)).unwrap();
+        renderer.draw_line(Point::new(545, 480), Point::new(545, 520)).unwrap();
+        renderer.draw_line(Point::new(655, 480), Point::new(655, 520)).unwrap();
+        renderer.draw_line(Point::new(545, 520), Point::new(655, 520)).unwrap();
     }
 }
 
@@ -780,8 +967,10 @@ fn run(sdl_context: sdl2::Sdl, ttf_context: sdl2_ttf::Sdl2TtfContext, mut render
 
         renderer.present();
 
-        if (16.66 - delta * 1000.0) > 0.0 {
-            timer.delay((16.66 - delta * 1000.0) as u32);
+        let now = clock_ticks::precise_time_s();
+        let delta = now - last_time;
+        if (16.66 - delta * 1000.0) > 1.0 {
+            timer.delay((16.66 - delta * 1000.0) as u32 - 1);
         }
     } 
 }
