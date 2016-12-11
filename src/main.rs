@@ -234,7 +234,7 @@ impl Effect for BackgroundEffect {
             EffectChange::None
         }
     }
-    fn render(&self, renderer: &mut Renderer, delta: f64) {
+    fn render(&self, renderer: &mut Renderer, _delta: f64) {
         let pos = if self.direction {
             ((800.0 + self.width as f64) * (self.time / self.duration)) as i32
         } else {
@@ -251,6 +251,57 @@ impl Effect for BackgroundEffect {
             } else {
                 renderer.draw_line(Point::new(pos + i, 0), Point::new(pos + i, 600)).unwrap();
             }
+        }
+    }
+}
+
+#[derive(Debug, Clone)]
+struct SpawnEffect {
+    lifetimes: Vec<f64>,
+    circles: Vec<Circle>,
+    walls: Vec<Wall>,
+    color: Color
+}
+
+impl SpawnEffect {
+    fn new(x: f64, y: f64, color: Color, mincount: i32, maxcount: i32, minlife: f64, maxlife: f64, minspeed: f64, maxspeed: f64, walls: Vec<Wall>) -> Self {
+        let mut rng = rand::thread_rng();
+        let count = rng.gen_range(mincount, maxcount);
+        SpawnEffect {
+            lifetimes: (0..count).map(|_| rng.gen_range(minlife, maxlife)).collect(),
+            circles: (0..count).map(|_| {
+                Circle::new(x, y, rng.gen_range(1, 3) as f64, Pointf64::of_rad(rng.gen_range(-std::f64::consts::PI, std::f64::consts::PI)) * rng.gen_range(minspeed, maxspeed), 0.8)
+            }).collect(),
+            walls: walls,
+            color: color
+        }
+    }
+}
+
+impl Effect for SpawnEffect {
+    fn update(&mut self, delta: f64) -> EffectChange {
+        let mut i = 0;
+        while i < self.circles.len() {
+            self.lifetimes[i] -= delta;
+            if self.lifetimes[i] <= 0.0 {
+                self.circles.remove(i);
+                self.lifetimes.remove(i);
+                continue;
+            } else {
+                self.circles[i].apply_velocity(delta, &self.walls, 800.0, 600.0);
+                i += 1;
+            }
+        }
+        return if self.circles.len() == 0 {
+            EffectChange::Ended
+        } else {
+            EffectChange::None
+        }
+    }
+    fn render(&self, renderer: &mut Renderer, _delta: f64) {
+        renderer.set_draw_color(self.color);
+        for circle in &self.circles {
+            draw_circle(renderer, circle.point.as_sdl(), circle.radius as i32);
         }
     }
 }
@@ -297,12 +348,12 @@ struct PlayState {
     aim: Targeting,
     targets: Vec<Circle>,
     walls: Vec<Wall>,
-    hits: i32,
     spawn_timer: f64,
     spawn_time_limit: f64,
     trail_time: f64,
     time: f64,
     effects: Vec<Box<Effect>>,
+    middle_effects: Vec<Box<Effect>>,
     bgtimer: f64
 }
 
@@ -509,18 +560,14 @@ impl PlayState {
             targets: Circle::random_n(target_count, 800.0, 600.0, 50.0, 250.0, 5.0, 10.0, 0.0),
             walls: vec![Wall::new(&[200.0, 200.0, 250.0, 200.0, 250.0, 400.0, 200.0, 400.0]),
                         Wall::new(&[550.0, 200.0, 600.0, 200.0, 600.0, 400.0, 550.0, 400.0])],
-            hits: 0,
             spawn_timer: 0.0,
             spawn_time_limit: spawn_time_limit,
             trail_time: trail_time,
             time: 0.0,
             effects: vec![],
+            middle_effects: vec![],
             bgtimer: 1.0
         }
-    }
-
-    fn score(&self) -> i32 {
-        10 // FIXME: do scoring
     }
 }
 
@@ -558,7 +605,13 @@ impl SceneObject for PlayState {
 
         if self.spawn_timer > self.spawn_time_limit {
             self.spawn_timer -= self.spawn_time_limit;
-            self.targets.push(Circle::random(800.0, 600.0, 50.0, 250.0, 5.0, 10.0, 0.0));
+            let target = Circle::random(800.0, 600.0, 50.0, 250.0, 5.0, 10.0, 0.0);
+            if self.spawn_time_limit <= 2.0 {
+                self.middle_effects.push(Box::new(SpawnEffect::new(target.point.x, target.point.y, Color::RGB(255, 255, 255), 5, 10, 1.0, 3.0, 50.0, 300.0, self.walls.clone())) as Box<Effect>);
+            } else {
+                self.middle_effects.push(Box::new(SpawnEffect::new(target.point.x, target.point.y, Color::RGB(255, 255, 255), 10, 20, 1.0, 3.0, 50.0, 300.0, self.walls.clone())) as Box<Effect>);
+            }
+            self.targets.push(target);
         }
 
         // Update all targets.
@@ -576,8 +629,14 @@ impl SceneObject for PlayState {
                 }
             }
         }
+        let mut ckilled = 0;
         for i in killed {
-            self.targets.remove(i);
+            {
+                let circle = self.targets[i - ckilled];
+                self.middle_effects.push(Box::new(SpawnEffect::new(circle.point.x, circle.point.y, Color::RGB(255, 0, 0), 5, 10, 1.0, 3.0, 50.0, 300.0, self.walls.clone())) as Box<Effect>);
+            }
+            self.targets.remove(i - ckilled);
+            ckilled += 1;
         }
 
         self.player.trail.circles.push((self.trail_time, self.player.circle));
@@ -606,6 +665,18 @@ impl SceneObject for PlayState {
             match self.effects[i].update(delta) {
                 EffectChange::Ended => {
                     self.effects.remove(i);
+                }
+                EffectChange::None => {
+                    i += 1;
+                }
+            }
+        }
+
+        let mut i = 0;
+        while i < self.middle_effects.len() {
+            match self.middle_effects[i].update(delta) {
+                EffectChange::Ended => {
+                    self.middle_effects.remove(i);
                 }
                 EffectChange::None => {
                     i += 1;
@@ -646,6 +717,10 @@ impl SceneObject for PlayState {
             effect.render(renderer, delta);
         }
 
+        for effect in &self.middle_effects {
+            effect.render(renderer, delta);
+        }
+
         let mouse_p = Pointf64::new(game.inputs.mouse_x as f64, game.inputs.mouse_y as f64);
         let player_p = self.player.circle.point;
         let player_ps = self.player.circle.point.as_sdl();
@@ -681,16 +756,8 @@ impl SceneObject for PlayState {
         for wall in self.walls.iter() {
             renderer.set_draw_color(Color::RGB(255, 255, 255));
             wall.draw(renderer);
-            renderer.set_draw_color(Color::RGB(100, 100, 100));
-            for pair in wall.points.windows(2) { // FIXME: remove debug lines
-                let projection = segment_projection(pair[0], pair[1], mouse_p);
-                if (projection * (pair[1] - pair[0])) as i32 == 0 && (pair[1] - pair[0]).normal_lhs() * projection > 0.0 {
-                    renderer.draw_line((mouse_p - projection).as_sdl(), mouse_p.as_sdl()).unwrap();
-                }
-            }
         }
 
-        let score = self.score();
         draw_text(renderer, &game.info_font,
                   10, 10,
                   Color::RGBA(255, 255, 255, 255),
@@ -767,8 +834,11 @@ impl SceneObject for ResultState {
         }
     }
 
-    fn handle_event(&mut self, _game: &mut GameState, event: Event) {
+    fn handle_event(&mut self, game: &mut GameState, event: Event) {
         match event {
+            Event::KeyDown { keycode: Some(Keycode::Space), .. } => {
+                game.switch_scene(PlayState::initial(100, 0.3, 2.0));
+            }
             _ => {}
         }
     }
