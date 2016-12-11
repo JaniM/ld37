@@ -849,9 +849,21 @@ impl SceneObject for ResultState {
             draw_text_centered(renderer, &game.score_font, 400, 200, Color::RGB(255, 255, 255),
                                "Circlin'");
         }
+
+        draw_text(renderer, &game.info_font, 20, 10, Color::RGB(200, 200, 200),
+                  "Controls:");
+        draw_text(renderer, &game.info_font, 20, 30, Color::RGB(200, 200, 200),
+                  "Hold left mouse button - apply force");
+        draw_text(renderer, &game.info_font, 20, 50, Color::RGB(200, 200, 200),
+                  "ESC - give up");
+
+        draw_text(renderer, &game.info_font, 20, 100, Color::RGB(200, 200, 200),
+                  "Catch 'em all to win.");
+        draw_text(renderer, &game.info_font, 20, 120, Color::RGB(200, 200, 200),
+                  "Hint: Your tail can capture targets too.");
         
         draw_text_centered(renderer, &game.text_font, 400, 300, Color::RGB(255, 255, 255),
-                           "Select a difficulty below or hit ESC to exit.");
+                           "Select a difficulty:");
         
         draw_text_centered(renderer, &game.text_font, 200, 400, Color::RGB(200, 200, 200),
                            "Easier");
