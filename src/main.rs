@@ -717,17 +717,13 @@ impl SceneObject for PlayState {
         renderer.set_draw_color(Color::RGB(255, 255, 255));
         renderer.draw_line(player_ps, target.as_sdl() ).unwrap();
 
-        if self.player.circle.velocity.length() < STOP_LIMIT {
-            renderer.set_draw_color(Color::RGB(50, 50, 255));
-        } else {
-            renderer.set_draw_color(Color::RGB(50, 255, 50));
-        }
-        draw_circle(renderer, player_ps, self.player.circle.radius as i32);
-
         renderer.set_draw_color(Color::RGB(50, 50, 255));
         for &(_age, circle) in self.player.trail.circles.iter() {
             draw_circle(renderer, circle.point.as_sdl(), circle.radius as i32);
         }
+
+        renderer.set_draw_color(Color::RGB(50, 50, 255));
+        draw_circle(renderer, player_ps, self.player.circle.radius as i32);
 
         for circle in self.targets.iter() {
             let ir = circle.radius as i32;
