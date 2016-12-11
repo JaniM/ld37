@@ -292,11 +292,7 @@ impl Effect for SpawnEffect {
                 i += 1;
             }
         }
-        return if self.circles.len() == 0 {
-            EffectChange::Ended
-        } else {
-            EffectChange::None
-        }
+        return if self.circles.len() == 0 { EffectChange::Ended } else { EffectChange::None }
     }
     fn render(&self, renderer: &mut Renderer, _delta: f64) {
         renderer.set_draw_color(self.color);
@@ -574,7 +570,7 @@ impl PlayState {
 impl SceneObject for PlayState {
     fn update(&mut self, game: &mut GameState, delta: f64) {
         let max_strength = 300.0;
-        let strength_scale = 1.0;
+        let strength_scale = 6.0;
 
         // Mouse coordinate as a handy vector :)
         let mouse_p = Pointf64::from_i32(game.inputs.mouse_x, game.inputs.mouse_y);
@@ -593,8 +589,8 @@ impl SceneObject for PlayState {
         // Apply velocity on click
         if game.inputs.mouse.left() { // && self.player.circling.is_some() {
             let target = Targeting::new(angle, length) * strength_scale;
-            let dist = target.length;
-            let v = Pointf64::of_rad(target.angle) * dist / 10.0;
+            let dist = target.length * delta;
+            let v = Pointf64::of_rad(target.angle) * dist;
             self.player.circle.velocity = self.player.circle.velocity + v;
         }
         if !game.inputs.mouse.left() {
@@ -633,7 +629,7 @@ impl SceneObject for PlayState {
         for i in killed {
             {
                 let circle = self.targets[i - ckilled];
-                self.middle_effects.push(Box::new(SpawnEffect::new(circle.point.x, circle.point.y, Color::RGB(255, 0, 0), 5, 10, 1.0, 3.0, 50.0, 300.0, self.walls.clone())) as Box<Effect>);
+                self.middle_effects.push(Box::new(SpawnEffect::new(circle.point.x, circle.point.y, Color::RGB(255, 0, 0), 5, 20, 1.0, 3.0, 50.0, 400.0, self.walls.clone())) as Box<Effect>);
             }
             self.targets.remove(i - ckilled);
             ckilled += 1;
