@@ -701,15 +701,6 @@ impl SceneObject for PlayState {
     fn quit_on_esc(&self) -> bool { false }
 
     fn render(&self, game: &mut GameState, renderer: &mut Renderer, delta: f64) {
-        {
-            let mut window = renderer.window_mut().unwrap();
-            window.set_title(&("Mouse: ".to_owned()
-                              + &game.inputs.mouse_x.to_string() 
-                              + ", " + &game.inputs.mouse_y.to_string() 
-                              + ", " + &game.fps.to_string()
-                              + ", " + &delta.to_string())).unwrap();
-        }
-
         renderer.set_draw_color(Color::RGB(0, 0, 0));
         renderer.clear();
 
@@ -854,6 +845,9 @@ impl SceneObject for ResultState {
         if let Some(time) = self.time {
             draw_text_centered(renderer, &game.score_font, 400, 200, Color::RGB(255, 255, 255),
                                &("Time taken: ".to_owned() + &(time as i32).to_string() + "s"));
+        } else {
+            draw_text_centered(renderer, &game.score_font, 400, 200, Color::RGB(255, 255, 255),
+                               "Circlin'");
         }
         
         draw_text_centered(renderer, &game.text_font, 400, 300, Color::RGB(255, 255, 255),
@@ -978,9 +972,9 @@ fn run(sdl_context: sdl2::Sdl, ttf_context: sdl2_ttf::Sdl2TtfContext, mut render
         changes: vec![],
         inputs: Inputs::new(),
         fps: 0.0,
-        info_font: ttf_context.load_font(std::path::Path::new("assets/Roboto-Medium.ttf"), 16).unwrap(),
-        score_font: ttf_context.load_font(std::path::Path::new("assets/Roboto-Medium.ttf"), 64).unwrap(),
-        text_font: ttf_context.load_font(std::path::Path::new("assets/Roboto-Medium.ttf"), 32).unwrap()
+        info_font: ttf_context.load_font(std::path::Path::new("Roboto-Medium.ttf"), 16).unwrap(),
+        score_font: ttf_context.load_font(std::path::Path::new("Roboto-Medium.ttf"), 64).unwrap(),
+        text_font: ttf_context.load_font(std::path::Path::new("Roboto-Medium.ttf"), 32).unwrap()
     };
     // let mut scene = Scene::Play(PlayState::initial(10));
     let mut scene = Box::new(ResultState::initial(None)) as Box<SceneObject>;
@@ -1051,7 +1045,7 @@ fn main() {
     let ttf_context = sdl2_ttf::init().unwrap();
     let video_subsystem = sdl_context.video().unwrap();
 
-    let window = video_subsystem.window("rust-sdl2 demo: Video", 800, 600)
+    let window = video_subsystem.window("Circlin'", 800, 600)
         .position_centered()
         .opengl()
         .build()
